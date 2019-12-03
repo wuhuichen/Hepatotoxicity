@@ -136,6 +136,321 @@ geneCo<-function(data1,data2,data3){
   
 }
 
+
+###=====================================================================
+### Get the Fit the dose response models
+### fit.type = "NULL"     - No values to fit the model
+###			   "CONSTANT" - The response is always constant to a value
+###            "LM"       - The response is fitted using lm
+###            "DRC"      - DRM-fitted models
+###=====================================================================
+FitDRCModel_OpenGates <- function(x)
+{
+  ### Init the same seed
+  set.seed(0)
+  
+  ### Get the data			
+  x.org <- x 
+  
+  
+  ### Remove data points that are not finite
+  x <- x[is.finite(x$Resp),,drop=FALSE]
+  
+  ### Make sure we have enough samples
+  if (nrow(x) < 4){
+    #print(x.org)
+    #cat(paste0("Not enough samples for ", feature.cur,
+    #	". Returning a null model.\n"))
+    #return(list(fit.type="NULL"))
+  }
+  
+  ### Check if the response is constant
+  if (length(unique(x$Resp))==1){
+    return(list(
+      fit.type="CONSTANT",
+      resp=unique(x$Resp))
+    )
+  }
+  
+  ### Build a sigmoidal model
+  ### Note: Higher maxIt is not always better. 1000 seems to be good enough
+  ### If does not converge, try another optimizer		
+  resp.model <- suppressWarnings(drm(Resp ~ Dosage, 
+                                     data=x, 
+                                     #subset=which(x[,"Dosage"] > 0),                                                
+                                     control=drmc(errorm=FALSE, maxIt=1000, method="Nelder-Mead"),
+                                     fct = LL.4(names=c("Slope","Lower Limit","Upper Limit", "EC50"))))
+  
+  
+  ### If does not converge, try another optimizer
+  if (!("type" %in% names(resp.model))){
+    resp.model <- suppressWarnings(drm(Resp ~ Dosage, 
+                                       data=x, 
+                                       #subset=which(x[,"Dosage"] > 0),
+                                       control=drmc(errorm=FALSE, maxIt=1000, method="SANN"),
+                                       fct = LL.4(names=c("Slope","Lower Limit","Upper Limit", "EC50"))))
+  }
+  
+  ### If does not converge, try another optimizer
+  if (!("type" %in% names(resp.model))){
+    resp.model <- suppressWarnings(drm(Resp ~ Dosage, 
+                                       data=x, 
+                                       #subset=which(x[,"Dosage"] > 0),
+                                       control=drmc(errorm=FALSE, maxIt=1000, method="CG"),
+                                       fct = LL.4(names=c("Slope","Lower Limit","Upper Limit", "EC50"))))
+  }
+  
+  ### If does not converge, try another optimizer
+  if (!("type" %in% names(resp.model))){
+    resp.model <- suppressWarnings(drm(Resp ~ Dosage, 
+                                       data=x, 
+                                       #subset=which(x[,"Dosage"] > 0),                                                
+                                       control=drmc(errorm=FALSE, maxIt=1000, method="BFGS"),
+                                       fct = LL.4(names=c("Slope","Lower Limit","Upper Limit", "EC50"))))
+  }
+  
+  ### If does not converge, try another optimizer
+  if (!("type" %in% names(resp.model))){
+    resp.model <- suppressWarnings(drm(Resp ~ Dosage, 
+                                       data=x, 
+                                       #subset=which(x[,"Dosage"] > 0),
+                                       control=drmc(errorm=FALSE, maxIt=1000, method="L-BFGS-B"),
+                                       fct = LL.4(names=c("Slope","Lower Limit","Upper Limit", "EC50"))))
+  }
+  ### If does not converge, try another optimizer
+  if (!("type" %in% names(resp.model))){
+    resp.model <- suppressWarnings(drm(Resp ~ Dosage, 
+                                       data=x, 
+                                       #subset=which(x[,"Dosage"] > 0),
+                                       control=drmc(errorm=FALSE, maxIt=1000, method="Brent"),
+                                       fct = LL.4(names=c("Slope","Lower Limit","Upper Limit", "EC50"))))
+  }
+  if (!("type" %in% names(resp.model))){
+    resp.model <- suppressWarnings(drm(Resp ~ Dosage, 
+                                       data=x, 
+                                       #subset=which(x[,"Dosage"] > 0),
+                                       control=drmc(errorm=FALSE, maxIt=1000),
+                                       fct = W1.4(names=c("Slope","Lower Limit","Upper Limit", "EC50"))))
+  }
+  
+  if (!("type" %in% names(resp.model))){
+    resp.model <- suppressWarnings(drm(Resp ~ Dosage, 
+                                       data=x, 
+                                       #subset=which(x[,"Dosage"] > 0),
+                                       control=drmc(errorm=FALSE, maxIt=1000),
+                                       fct = W2.4(names=c("Slope","Lower Limit","Upper Limit", "EC50"))))
+  }                               
+  
+  if (!("type" %in% names(resp.model))){
+    resp.model <- suppressWarnings(drm(Resp ~ Dosage, 
+                                       data=x, 
+                                       #subset=which(x[,"Dosage"] > 0),
+                                       control=drmc(errorm=FALSE, maxIt=1000),
+                                       fct = LL2.4(names=c("Slope","Lower Limit","Upper Limit", "EC50"))))
+  }  
+  resp.model[["fit.type"]] <- "DRC"
+  
+  ### If still does not converge, use a constant model
+  if (!("type" %in% names(resp.model))){  
+    
+    ### Use a constant model		
+    #cat("Linear model used.\n")
+    #resp.model[[stat.idx]][[idx]] <- lm(Plot.Response ~ log10(Dosage), 
+    #			data=x,
+    #		  	subset=which(x[,"Dosage"] > 0))
+    
+    #cat(paste0("[Warning] Constant model used for ", feature.cur ,".\n"))
+    resp.model <- lm(Resp ~ 1, 
+                     #subset=which(x[,"Dosage"] > 0),
+                     data=x)
+    
+    resp.model[["fit.type"]] <- "LM"
+    resp.model[["origData"]] <- x
+    
+    #X11()
+    #plot(x=log10(x$Dosage), y=x$Resp)
+    #title(feature.cur)
+  }		
+  
+  ### Return the models
+  resp.model	
+}
+
+###=====================================================================
+### Compute features from a dose response curve
+### prop.names =  "R.5000", "EC50", "Rinf", "AUC"
+###=====================================================================
+ExtractDRCFeatures_OpenGates <- function(resp.model, prop.names)
+{	
+  ### Init the output
+  prop.values <- rep(NA, length(prop.names))
+  names(prop.values) <- prop.names
+  
+  ### For constant model
+  if (resp.model$fit.type == "CONSTANT"){
+    
+    ### Loop through all the features
+    for (idx in 1:length(prop.names)){			
+      
+      ### EC50
+      prop.values[idx] <- if (prop.names[idx] == "EC50"){
+        ifelse(resp.model$resp == 0, Inf, -Inf)
+        
+        ### R infinity
+      }else if (prop.names[idx] == "Rinf"){				
+        resp.model$resp
+        
+        ### R-values
+      }else if (length(grep("^R\\.", prop.names[idx]))>0){
+        resp.model$resp
+        
+        ### Area under the curve
+      }else if (prop.names[idx] == "AUC"){			
+        0
+        
+        #### Return error message
+      }else{
+        stop(paste0("Property = ", prop.names[idx], " undefined. Wrong spelling?"))
+      }
+      
+    }
+    
+  }
+  
+  if (resp.model$fit.type == "DRC"){
+    
+    ### Do a high-res prediction
+    dosages <- log10(unique(resp.model$origData$Dosage))
+    dosages <- 10^seq(dosages[1], tail(dosages, n=1), length.out=100)			
+    resp.pred <- predict(resp.model, data.frame(Dosage=dosages))
+    
+    ### Check the direction of the fitted curves			
+    direction <- ifelse(tail(resp.pred, n=1) > resp.pred[1], "up", "down")
+    
+    ### Loop through all the features
+    for (idx in 1:length(prop.names)){
+      
+      ### EC50
+      if (prop.names[idx] == "EC50"){
+        prop.values[idx] <- resp.model$coefficients[4]
+        
+        ### R infinity
+      }else if (prop.names[idx] == "Rinf"){			
+        if(direction == "up"){
+          prop.values[idx] <- resp.model$coefficients[3]
+        }else{
+          prop.values[idx] <- resp.model$coefficients[2]
+        }			
+        
+        ### R-values
+      }else if (length(grep("^R\\.", prop.names[idx]))>0){
+        dose.target <- as.numeric(strsplit(prop.names[idx], "\\.")[[1]][2])
+        prop.values[idx] <- predict(resp.model, data.frame(Dosage=dose.target))
+        
+        ### Area under the curve
+        ### TODO: The AUC defintion will need to be corrected
+      }else if (prop.names[idx] == "AUC"){
+        
+        prop.values[idx] <- if(direction == "up"){
+          mean(abs(resp.pred-resp.pred[1]))
+        }else{
+          mean(abs(resp.pred[1]-resp.pred))
+        }				
+        
+        #### Return error message
+      }else{
+        stop(paste0("Property = ", prop.names[idx], " undefined. Wrong spelling?"))
+      }
+      
+    }
+  }
+  
+  
+  if (resp.model$fit.type == "LM"){
+    
+    ### Loop through all the features
+    for (idx in 1:length(prop.names)){			
+      
+      ### Predict the resp values at a constant value (which can be anything!)
+      resp.pred <- predict(resp.model, data.frame(Dosage=5000))
+      
+      ### EC50
+      if (prop.names[idx] == "EC50"){
+        prop.values[idx] <- Inf			
+        
+        ### R infinity
+      }else if (prop.names[idx] == "Rinf"){				
+        prop.values[idx] <- resp.pred			
+        
+        ### R-values
+      }else if (length(grep("^R\\.", prop.names[idx]))>0){
+        prop.values[idx] <- resp.pred
+        
+        ### Area under the curve
+        ### TODO: The AUC defintion will need to be corrected
+      }else if (prop.names[idx] == "AUC"){			
+        prop.values[idx] <- 0
+        
+        #### Return error message
+      }else{
+        stop(paste0("Property = ", prop.names[idx], " undefined. Wrong spelling?"))
+      }
+      
+    }
+  }
+  
+  ### Return the values for NULL models
+  prop.values
+}
+
+#####extraction of parameter####################
+paramExtr<-function(data,param){
+  col<-(length(data[[1]][1,])-1)
+  row<-length(data[[1]][,1])
+  result<-data.frame(matrix(0,row,col))
+  #result<-data[[1]]
+  result[,1]<-data[[1]][,1]
+  name<-colnames(data[[1]])
+  name<-name[1:(length(name)-1)]
+  colnames(result)<-c(name)
+  del<-c()
+  for(i in 1:3){
+    for(j in 2:col){
+      data[[i]][,j]<-as.character(data[[i]][,j])
+      data[[i]][,j]<-as.numeric(data[[i]][,j])
+      result[,j]<-as.character(result[,j])
+      result[,j]<-as.numeric(result[,j])
+    }
+  }
+  Resp=c(0,0,0)
+  Dosage=c(0,0,0)
+  excel<-data.frame(Dosage,Resp)
+  result<-result[,1:length(result[1,])]
+  for(i in 1:row){
+    for(j in 2:col){
+      excel$Resp=c(data[[1]][i,j],data[[2]][i,j],data[[3]][i,j])
+      if(sum(!is.na(excel$Resp))<3){
+        result[i,j]=NA
+        if(j==col){
+          break()
+        }
+        next()
+      }
+     
+      excel$Dosage=c(data[[1]][i,length(data[[1]][1,])],data[[2]][i,length(data[[1]][1,])],data[[3]][i,length(data[[1]][1,])])
+      #x=data.frame(Dosage,Resp)
+      model=FitDRCModel_OpenGates(excel)
+      y=ExtractDRCFeatures_OpenGates(model,param)
+      y<-as.numeric(y)
+      result[i,j]<-y
+      cat('drug',i,'gene',j,':',result[i,j],'finished\n')
+      }
+  }
+  return(result)
+  
+}
+
+
 ##########select the liver data
 liverData<-function(data){
   mark<-c()
